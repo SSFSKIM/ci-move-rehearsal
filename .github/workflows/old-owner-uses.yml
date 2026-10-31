@@ -1,0 +1,6 @@
+# After the transfer, this names the repo by its old owner: Actions documents that uses: does not follow the redirect.
+name: old-owner-uses
+on: workflow_dispatch
+jobs:
+  call:
+    uses: SSFSKIM/ci-move-rehearsal/.github/workflows/reusable.yml@main

@@ -1,0 +1,13 @@
+# The org-move rehearsal (CI-opt, 2026-10-31): one pool gate, so the bake builds this repo's image from its own
+# declaration and the webhook launches a pool runner for it under its owner's App installation.
+version: 1
+setup:
+  apt: [hello]
+gates:
+  - name: pool-probe
+    lane: pool
+    cpus: 2
+    timeout: 10
+    run: |
+      hello
+      echo "repo=$GITHUB_REPOSITORY runner=$RUNNER_NAME nproc=$(nproc)"

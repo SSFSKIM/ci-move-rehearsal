@@ -1,0 +1,70 @@
+# What survives a transfer. Run with phase=before, transfer, then run with phase=after and compare the two runs.
+name: probe
+on:
+  workflow_dispatch:
+    inputs:
+      phase: {type: choice, options: [before, after], default: before}
+      selfhosted: {type: boolean, default: false}
+      guest: {type: boolean, default: false}
+      fanout: {type: boolean, default: false}
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+jobs:
+  state:
+    runs-on: ubuntu-latest
+    environment: rehearsal-env
+    steps:
+      - env:
+          V: ${{ vars.REHEARSAL_VAR }}
+          S: ${{ secrets.REHEARSAL_SECRET }}
+          E: ${{ secrets.ENV_SECRET }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "variable=[${V}] repo-secret-length=${#S} env-secret-length=${#E}"
+          echo "repository=$GITHUB_REPOSITORY owner_id=$GITHUB_REPOSITORY_OWNER_ID repository_id=$GITHUB_REPOSITORY_ID"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts" -q '.artifacts[] | "artifact \(.name) \(.created_at) expired=\(.expired)"'
+          gh api "repos/$GITHUB_REPOSITORY/actions/caches" -q '.actions_caches[] | "cache \(.key) \(.size_in_bytes)"'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?per_page=100" -q '"runs in history: \(.total_count)"'
+  oidc:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          t=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=rehearsal" | jq -r .value)
+          p=$(cut -d. -f2 <<<"$t" | tr '_-' '/+'); while (( ${#p} % 4 )); do p+='='; done
+          base64 -d <<<"$p" | jq '{sub, repository, repository_owner, repository_owner_id, repository_id}'
+  cache:
+    runs-on: ubuntu-latest
+    steps:
+      - run: mkdir -p c && echo "saved $(date -u +%FT%TZ)" > c/stamp
+      - if: inputs.phase == 'before'
+        uses: actions/cache/save@v4
+        with: {path: c, key: rehearsal-cache-v1}
+      - if: inputs.phase == 'after'
+        id: restore
+        uses: actions/cache/restore@v4
+        with: {path: c, key: rehearsal-cache-v1, lookup-only: true}
+      - if: inputs.phase == 'after'
+        run: echo "cache-hit=${{ steps.restore.outputs.cache-hit }}"
+      - if: inputs.phase == 'before'
+        uses: actions/upload-artifact@v4
+        with: {name: rehearsal-artifact, path: c, retention-days: 7}
+  selfhosted:
+    if: inputs.selfhosted
+    runs-on: [self-hosted, rehearsal-vm]
+    steps:
+      - run: echo "runner=$RUNNER_NAME repo=$GITHUB_REPOSITORY"
+  guest:
+    if: inputs.guest
+    runs-on: [ci-kit-mac-solo, ci-kit-mac-vm]
+    timeout-minutes: 15
+    steps:
+      - run: echo "runner=$RUNNER_NAME repo=$GITHUB_REPOSITORY"
+  fanout:
+    if: inputs.fanout
+    strategy:
+      matrix: {n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+    runs-on: macos-26
+    steps:
+      - run: echo "n=${{ matrix.n }} start=$(date -u +%TZ)"; sleep 180
